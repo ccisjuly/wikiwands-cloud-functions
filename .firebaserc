@@ -1,0 +1,12 @@
+{
+  "projects": {
+    "default": "wikiwands"
+  },
+  "targets": {
+    "wikiwands": {
+      "functions": {
+        "serviceAccount": "wikiwands@appspot.gserviceaccount.com"
+      }
+    }
+  }
+}
