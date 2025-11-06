@@ -1,0 +1,76 @@
+import * as functions from "firebase-functions/v1";
+import {addPaidCredit} from "./credits.js";
+import {COLLECTIONS} from "./types.js";
+
+/**
+ * 监听 users/{uid} 文档的更新事件
+ * RevenueCat Firebase Extension 会将用户数据（包括 non_subscriptions）写入到此文档
+ * 当检测到新的非订阅购买时，增加用户的 paid_credit
+ */
+export const onNonSubscriptionPurchase = functions.firestore
+  .document(`${COLLECTIONS.USERS}/{uid}`)
+  .onUpdate(async (change, context) => {
+    const uid = context.params.uid;
+    const beforeData = change.before.data();
+    const afterData = change.after.data();
+
+    functions.logger.info(`📦 检测到用户数据更新: ${uid}`);
+
+    try {
+      const beforeNonSubscriptions = beforeData.non_subscriptions || {};
+      const afterNonSubscriptions = afterData.non_subscriptions || {};
+
+      // 检查是否有新的非订阅购买
+      let hasNewPurchase = false;
+      const newProducts: string[] = [];
+
+      // 遍历所有产品
+      for (const [productId, afterPurchases] of Object.entries(
+        afterNonSubscriptions
+      )) {
+        const beforePurchases =
+          beforeNonSubscriptions[productId] || [];
+        const afterPurchasesArray =
+          afterPurchases as Array<Record<string, unknown>>;
+
+        // 如果购买记录数量增加了，说明有新购买
+        const beforePurchasesArray =
+          beforePurchases as Array<Record<string, unknown>>;
+        if (afterPurchasesArray.length > beforePurchasesArray.length) {
+          hasNewPurchase = true;
+          newProducts.push(productId);
+          functions.logger.info(
+            `✅ 检测到新的非订阅购买: ${productId} (用户: ${uid})`,
+            {
+              beforeCount: beforePurchasesArray.length,
+              afterCount: afterPurchasesArray.length,
+            }
+          );
+        }
+      }
+
+      // 如果有新购买，增加 paid_credit
+      if (hasNewPurchase) {
+        functions.logger.info(
+          `💰 检测到 ${newProducts.length} 个新的非订阅购买，为用户 ${uid} 增加 10 点 paid_credit`,
+          {products: newProducts}
+        );
+        await addPaidCredit(uid);
+        functions.logger.info(`✅ 已为用户 ${uid} 增加 paid_credit`);
+      } else {
+        functions.logger.info(
+          `ℹ️ 用户 ${uid} 的数据更新，但没有新的非订阅购买，跳过处理`
+        );
+      }
+
+      return null;
+    } catch (error: unknown) {
+      functions.logger.error(
+        `❌ 处理非订阅购买事件失败 (用户: ${uid}):`,
+        error
+      );
+      // 不抛出错误，避免重试导致重复处理
+      return null;
+    }
+  });
+
