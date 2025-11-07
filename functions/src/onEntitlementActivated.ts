@@ -181,7 +181,7 @@ export const onEntitlementActivated = functions.firestore
           `重置用户 ${uid} 的 gift_credit 为 10 点`,
           {entitlements: activatedEntitlements}
         );
-        await resetGiftCredit(uid);
+        await resetGiftCredit(uid, "entitlement_activated");
         functions.logger.info(`✅ 已重置用户 ${uid} 的 gift_credit`);
       }
 

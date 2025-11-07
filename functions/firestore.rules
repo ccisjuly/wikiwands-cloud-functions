@@ -22,5 +22,19 @@ service cloud.firestore {
       allow read: if owner(uid);
       allow write: if false; // Only Functions/Admin SDK can write
     }
+
+    // 视频任务：只有创建者可以读写
+    match /video_tasks/{taskId} {
+      allow read: if request.auth != null && 
+        (resource == null || resource.data.uid == request.auth.uid);
+      allow write: if false; // Only Functions/Admin SDK can write
+    }
+
+    // 用户图片：只有用户自己可以读写
+    match /user_images/{imageId} {
+      allow read: if request.auth != null && 
+        (resource == null || resource.data.uid == request.auth.uid);
+      allow write: if false; // Only Functions/Admin SDK can write
+    }
   }
 }

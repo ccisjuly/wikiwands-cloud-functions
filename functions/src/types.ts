@@ -23,6 +23,7 @@ export const COLLECTIONS = {
   ENTITLEMENTS: "entitlements",
   PAYMENTS_RC: "payments/rc",
   CREDITS: "credits",
+  TRANSACTIONS: "transactions",
 } as const;
 
 export const RC_EVENT_FIELD = {

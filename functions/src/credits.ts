@@ -40,18 +40,23 @@ async function getOrCreateCreditsDoc(
  * 重置用户的 gift_credit 为 10 点
  * 使用 transaction 防止并发问题
  * @param {string} uid 用户 ID
+ * @param {string} reason 发放原因（可选，如 "monthly_reset", "entitlement_activated"）
  */
-export async function resetGiftCredit(uid: string): Promise<void> {
+export async function resetGiftCredit(
+  uid: string,
+  reason?: string
+): Promise<void> {
   const creditsRef = db.doc(`${COLLECTIONS.CREDITS}/${uid}`);
 
   await db.runTransaction(async (transaction) => {
     const creditsDoc = await transaction.get(creditsRef);
+    const now = admin.firestore.FieldValue.serverTimestamp();
+    const amount = CREDIT_CONSTANTS.MONTHLY_GIFT_CREDIT;
 
     if (!creditsDoc.exists) {
       // 如果文档不存在，创建新文档
-      const now = admin.firestore.FieldValue.serverTimestamp();
       const initialCredits: CreditsDoc = {
-        gift_credit: CREDIT_CONSTANTS.MONTHLY_GIFT_CREDIT,
+        gift_credit: amount,
         paid_credit: 0,
         last_gift_reset: now as FirebaseFirestore.Timestamp,
         updatedAt: now,
@@ -59,13 +64,38 @@ export async function resetGiftCredit(uid: string): Promise<void> {
       transaction.set(creditsRef, initialCredits);
     } else {
       // 更新现有文档
-      const now = admin.firestore.FieldValue.serverTimestamp();
       transaction.update(creditsRef, {
-        gift_credit: CREDIT_CONSTANTS.MONTHLY_GIFT_CREDIT,
+        gift_credit: amount,
         last_gift_reset: now,
         updatedAt: now,
       });
     }
+
+    // 记录发放记录到 transactions 集合
+    const transactionId =
+      `txn_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const transactionRef =
+      db.collection(COLLECTIONS.TRANSACTIONS).doc(transactionId);
+    const transactionData: {
+      uid: string;
+      type: string;
+      amount: number;
+      added_gift: number;
+      reason?: string;
+      created_at: admin.firestore.FieldValue;
+    } = {
+      uid,
+      type: "grant", // 发放类型
+      amount,
+      added_gift: amount,
+      created_at: now,
+    };
+
+    if (reason) {
+      transactionData.reason = reason;
+    }
+
+    transaction.set(transactionRef, transactionData);
   });
 
   functions.logger.info(
@@ -112,19 +142,23 @@ export async function clearGiftCredit(uid: string): Promise<void> {
  * 使用 transaction 防止并发问题
  * @param {string} uid 用户 ID
  * @param {number} amount 增加的点数，默认 10
+ * @param {string} productId 产品 ID（可选，用于记录购买记录）
+ * @param {string} purchaseId 购买 ID（可选，用于记录购买记录）
  */
 export async function addPaidCredit(
   uid: string,
-  amount: number = CREDIT_CONSTANTS.NON_SUBSCRIPTION_PURCHASE_CREDIT
+  amount: number = CREDIT_CONSTANTS.NON_SUBSCRIPTION_PURCHASE_CREDIT,
+  productId?: string,
+  purchaseId?: string
 ): Promise<void> {
   const creditsRef = db.doc(`${COLLECTIONS.CREDITS}/${uid}`);
 
   await db.runTransaction(async (transaction) => {
     const creditsDoc = await transaction.get(creditsRef);
+    const now = admin.firestore.FieldValue.serverTimestamp();
 
     if (!creditsDoc.exists) {
       // 如果文档不存在，创建新文档
-      const now = admin.firestore.FieldValue.serverTimestamp();
       const initialCredits: CreditsDoc = {
         gift_credit: 0,
         paid_credit: amount,
@@ -135,12 +169,41 @@ export async function addPaidCredit(
       // 更新现有文档
       const currentData = creditsDoc.data() as CreditsDoc;
       const newPaidCredit = (currentData.paid_credit || 0) + amount;
-      const now = admin.firestore.FieldValue.serverTimestamp();
       transaction.update(creditsRef, {
         paid_credit: newPaidCredit,
         updatedAt: now,
       });
     }
+
+    // 记录购买记录到 transactions 集合
+    const transactionId =
+      `txn_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const transactionRef =
+      db.collection(COLLECTIONS.TRANSACTIONS).doc(transactionId);
+    const transactionData: {
+      uid: string;
+      type: string;
+      amount: number;
+      added_paid: number;
+      product_id?: string;
+      purchase_id?: string;
+      created_at: admin.firestore.FieldValue;
+    } = {
+      uid,
+      type: "purchase", // 购买类型
+      amount,
+      added_paid: amount,
+      created_at: now,
+    };
+
+    if (productId) {
+      transactionData.product_id = productId;
+    }
+    if (purchaseId) {
+      transactionData.purchase_id = purchaseId;
+    }
+
+    transaction.set(transactionRef, transactionData);
   });
 
   functions.logger.info(`✅ 已为用户 ${uid} 增加 ${amount} 点 paid_credit`);
@@ -152,11 +215,15 @@ export async function addPaidCredit(
  * 使用 transaction 防止并发问题
  * @param {string} uid 用户 ID
  * @param {number} amount 使用的点数
+ * @param {string} usageType 使用类型（如 "video_generation"）
+ * @param {string | null} usageId 使用关联的 ID（如视频 ID，可选）
  * @return {Promise<Object>} 返回使用结果
  */
 export async function useCredits(
   uid: string,
-  amount: number
+  amount: number,
+  usageType = "unknown",
+  usageId: string | null = null
 ): Promise<{
   success: boolean;
   usedGift: number;
@@ -219,6 +286,36 @@ export async function useCredits(
     }
 
     transaction.update(creditsRef, updates);
+
+    // 记录消费记录到 transactions 集合
+    const transactionId =
+      `txn_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+    const transactionRef =
+      db.collection(COLLECTIONS.TRANSACTIONS).doc(transactionId);
+    const transactionData: {
+      uid: string;
+      type: string;
+      amount: number;
+      used_gift: number;
+      used_paid: number;
+      usage_type: string;
+      usage_id?: string;
+      created_at: admin.firestore.FieldValue;
+    } = {
+      uid,
+      type: "usage", // 消费类型
+      amount,
+      used_gift: usedGift,
+      used_paid: usedPaid,
+      usage_type: usageType,
+      created_at: now,
+    };
+
+    if (usageId) {
+      transactionData.usage_id = usageId;
+    }
+
+    transaction.set(transactionRef, transactionData);
 
     functions.logger.info(
       `✅ 用户 ${uid} 使用了 ${amount} 点: gift=${usedGift}, paid=${usedPaid}`

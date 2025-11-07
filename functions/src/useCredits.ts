@@ -21,7 +21,13 @@ export const useCredits = functions.https.onCall(async (data, context) => {
   const amount = CREDIT_CONSTANTS.USE_CREDITS_AMOUNT;
 
   try {
-    const result = await useCreditsInternal(uid, amount);
+    // 传递 usageType 为 "manual_deduction" 表示手动扣除
+    const result = await useCreditsInternal(
+      uid,
+      amount,
+      "manual_deduction",
+      null
+    );
     return result;
   } catch (error: unknown) {
     functions.logger.error(

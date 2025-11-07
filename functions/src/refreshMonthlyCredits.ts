@@ -58,7 +58,7 @@ export const refreshMonthlyCredits = functions.pubsub
 
         if (hasActiveEntitlement) {
           try {
-            await resetGiftCredit(uid);
+            await resetGiftCredit(uid, "monthly_reset");
             processedCount++;
             functions.logger.info(`✅ 已重置用户 ${uid} 的 gift_credit`);
           } catch (error: unknown) {

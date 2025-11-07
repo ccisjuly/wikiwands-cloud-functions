@@ -1,1 +1,0 @@
-# wikiwands-cloud-functions

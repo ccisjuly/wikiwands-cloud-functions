@@ -21,8 +21,10 @@ export const onNonSubscriptionPurchase = functions.firestore
       const afterNonSubscriptions = afterData.non_subscriptions || {};
 
       // 检查是否有新的非订阅购买
-      let hasNewPurchase = false;
-      const newProducts: string[] = [];
+      const newPurchases: Array<{
+        productId: string;
+        purchaseId?: string;
+      }> = [];
 
       // 遍历所有产品
       for (const [productId, afterPurchases] of Object.entries(
@@ -37,25 +39,47 @@ export const onNonSubscriptionPurchase = functions.firestore
         const beforePurchasesArray =
           beforePurchases as Array<Record<string, unknown>>;
         if (afterPurchasesArray.length > beforePurchasesArray.length) {
-          hasNewPurchase = true;
-          newProducts.push(productId);
+          // 获取最新的购买记录
+          const latestPurchase =
+            afterPurchasesArray[afterPurchasesArray.length - 1];
+          const purchaseId =
+            (latestPurchase.id as string) ||
+            (latestPurchase.store_transaction_id as string) ||
+            undefined;
+
+          newPurchases.push({
+            productId,
+            purchaseId,
+          });
+
           functions.logger.info(
             `✅ 检测到新的非订阅购买: ${productId} (用户: ${uid})`,
             {
               beforeCount: beforePurchasesArray.length,
               afterCount: afterPurchasesArray.length,
+              purchaseId,
             }
           );
         }
       }
 
-      // 如果有新购买，增加 paid_credit
-      if (hasNewPurchase) {
+      // 如果有新购买，为每个购买增加 paid_credit
+      if (newPurchases.length > 0) {
         functions.logger.info(
-          `💰 检测到 ${newProducts.length} 个新的非订阅购买，为用户 ${uid} 增加 10 点 paid_credit`,
-          {products: newProducts}
+          `💰 检测到 ${newPurchases.length} 个新的非订阅购买，为用户 ${uid} 增加点数`,
+          {purchases: newPurchases}
         );
-        await addPaidCredit(uid);
+
+        // 为每个新购买增加点数（通常每个购买增加 10 点）
+        for (const purchase of newPurchases) {
+          await addPaidCredit(
+            uid,
+            undefined, // 使用默认值
+            purchase.productId,
+            purchase.purchaseId
+          );
+        }
+
         functions.logger.info(`✅ 已为用户 ${uid} 增加 paid_credit`);
       } else {
         functions.logger.info(
