@@ -24,8 +24,30 @@ export const useCredits = functions.https.onCall(async (data, context) => {
     const result = await useCreditsInternal(uid, amount);
     return result;
   } catch (error: unknown) {
-    functions.logger.error(`❌ 使用点数失败 (用户: ${uid}, 数量: ${amount}):`, error);
-    throw error;
+    functions.logger.error(
+      `❌ 使用点数失败 (用户: ${uid}, 数量: ${amount}):`,
+      error
+    );
+
+    // 如果是已知的错误类型，直接抛出
+    if (error instanceof Error && "code" in error) {
+      const code = (error as Error & {code: string}).code;
+      const message = error.message;
+
+      if (code === "not-found") {
+        throw new functions.https.HttpsError("not-found", message);
+      } else if (code === "failed-precondition") {
+        throw new functions.https.HttpsError("failed-precondition", message);
+      }
+    }
+
+    // 其他错误转换为 internal 错误
+    const errorMessage =
+      error instanceof Error ? error.message : String(error);
+    throw new functions.https.HttpsError(
+      "internal",
+      `Failed to use credits: ${errorMessage}`
+    );
   }
 });
 

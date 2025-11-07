@@ -169,10 +169,10 @@ export async function useCredits(
     const creditsDoc = await transaction.get(creditsRef);
 
     if (!creditsDoc.exists) {
-      throw new functions.https.HttpsError(
-        "not-found",
-        "Credits document not found"
-      );
+      const error = new Error("Credits document not found") as
+        Error & {code: string};
+      error.code = "not-found";
+      throw error;
     }
 
     const currentData = creditsDoc.data() as CreditsDoc;
@@ -181,11 +181,12 @@ export async function useCredits(
     const total = currentGift + currentPaid;
 
     if (total < amount) {
-      throw new functions.https.HttpsError(
-        "failed-precondition",
+      const error = new Error(
         `Insufficient credits. Required: ${amount}, ` +
         `Available: ${total}`
-      );
+      ) as Error & {code: string};
+      error.code = "failed-precondition";
+      throw error;
     }
 
     // 先用 gift_credit，再用 paid_credit
@@ -249,10 +250,10 @@ export async function refundCredits(
     const creditsDoc = await transaction.get(creditsRef);
 
     if (!creditsDoc.exists) {
-      throw new functions.https.HttpsError(
-        "not-found",
-        "Credits document not found"
-      );
+      const error = new Error("Credits document not found") as
+        Error & {code: string};
+      error.code = "not-found";
+      throw error;
     }
 
     const currentData = creditsDoc.data() as CreditsDoc;

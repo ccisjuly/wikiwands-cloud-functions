@@ -28,6 +28,37 @@ export const onEntitlementActivated = functions.firestore
       const beforeEntitlements = beforeData.entitlements || {};
       const afterEntitlements = afterData.entitlements || {};
 
+      // 详细日志：打印权益数据
+      const beforeKeys = Object.keys(beforeEntitlements);
+      const afterKeys = Object.keys(afterEntitlements);
+      functions.logger.info(
+        `📊 更新前权益数量: ${beforeKeys.length}`
+      );
+      functions.logger.info(
+        `📊 更新后权益数量: ${afterKeys.length}`
+      );
+      functions.logger.info(
+        `📊 更新前权益: ${JSON.stringify(beforeKeys)}`
+      );
+      functions.logger.info(
+        `📊 更新后权益: ${JSON.stringify(afterKeys)}`
+      );
+
+      // 打印每个权益的详细信息
+      for (const [key, value] of Object.entries(afterEntitlements)) {
+        const entitlement = value as Record<string, unknown>;
+        functions.logger.info(
+          `📋 权益 ${key}:`,
+          {
+            expires_date: entitlement.expires_date,
+            product_identifier: entitlement.product_identifier,
+            purchase_date: entitlement.purchase_date,
+            is_active: entitlement.is_active,
+            allFields: Object.keys(entitlement),
+          }
+        );
+      }
+
       // 检查是否有权益从非激活变为激活
       let hasNewlyActivated = false;
       const activatedEntitlements: string[] = [];
@@ -36,15 +67,36 @@ export const onEntitlementActivated = functions.firestore
       let hasExpired = false;
       const expiredEntitlements: string[] = [];
 
-      // 辅助函数：判断权益是否激活（基于 expires_date）
+      // 辅助函数：判断权益是否激活
+      // 优先检查 is_active 字段，如果没有则检查 expires_date
       const isEntitlementActive = (
-        expiresDate: string | null | undefined
+        entitlement: Record<string, unknown>
       ): boolean => {
+        // 优先使用 is_active 字段（如果存在）
+        if (typeof entitlement.is_active === "boolean") {
+          return entitlement.is_active;
+        }
+
+        // 如果没有 is_active，则检查 expires_date
+        const expiresDate = entitlement.expires_date as
+          string | null | undefined;
         if (!expiresDate) return false;
         try {
           const expiry = new Date(expiresDate);
-          return expiry > new Date();
-        } catch {
+          const now = new Date();
+          const isActive = expiry > now;
+          functions.logger.info(
+            `🔍 检查 expires_date: ${expiresDate}, ` +
+            `解析后: ${expiry.toISOString()}, ` +
+            `当前: ${now.toISOString()}, ` +
+            `激活: ${isActive}`
+          );
+          return isActive;
+        } catch (error) {
+          functions.logger.warn(
+            `⚠️ 解析 expires_date 失败: ${expiresDate}`,
+            error
+          );
           return false;
         }
       };
@@ -54,24 +106,28 @@ export const onEntitlementActivated = functions.firestore
         afterEntitlements
       )) {
         const beforeEntitlement =
-          beforeEntitlements[entitlementKey] as Record<string, unknown>;
+          beforeEntitlements[entitlementKey] as
+            Record<string, unknown> | undefined;
         const afterEntitlementData =
           afterEntitlement as Record<string, unknown>;
 
-        // 判断权益现在是否激活（基于 expires_date）
-        const isNowActive = isEntitlementActive(
-          afterEntitlementData.expires_date as string | null | undefined
-        );
+        // 判断权益现在是否激活
+        const isNowActive = isEntitlementActive(afterEntitlementData);
 
         // 判断权益之前是否激活
         const wasActive = beforeEntitlement ?
-          isEntitlementActive(
-            beforeEntitlement.expires_date as string | null | undefined
-          ) :
+          isEntitlementActive(beforeEntitlement) :
           false;
 
+        functions.logger.info(
+          `🔍 权益 ${entitlementKey}: ` +
+          `之前激活=${wasActive}, ` +
+          `现在激活=${isNowActive}, ` +
+          `之前存在=${!!beforeEntitlement}`
+        );
+
         if (isNowActive) {
-          // 检查之前是否未激活
+          // 检查之前是否未激活（包括首次创建的情况）
           if (!wasActive) {
             hasNewlyActivated = true;
             activatedEntitlements.push(entitlementKey);
@@ -79,6 +135,9 @@ export const onEntitlementActivated = functions.firestore
               `✅ 检测到权益激活: ${entitlementKey} (用户: ${uid})`,
               {
                 expiresDate: afterEntitlementData.expires_date,
+                isActive: afterEntitlementData.is_active,
+                productIdentifier: afterEntitlementData.product_identifier,
+                isNewEntitlement: !beforeEntitlement,
               }
             );
           }
@@ -89,7 +148,7 @@ export const onEntitlementActivated = functions.firestore
           functions.logger.info(
             `⚠️ 检测到权益消失: ${entitlementKey} (用户: ${uid})`,
             {
-              beforeExpiresDate: beforeEntitlement.expires_date,
+              beforeExpiresDate: beforeEntitlement?.expires_date,
               afterExpiresDate: afterEntitlementData.expires_date,
             }
           );
@@ -103,8 +162,7 @@ export const onEntitlementActivated = functions.firestore
         if (!afterEntitlements[entitlementKey]) {
           // 权益被删除
           const wasActive = isEntitlementActive(
-            (beforeEntitlement as Record<string, unknown>)
-              .expires_date as string | null | undefined
+            beforeEntitlement as Record<string, unknown>
           );
           if (wasActive) {
             hasExpired = true;
