@@ -7,10 +7,12 @@ import {getConfig} from "./config.js";
 interface AvatarInfo {
   avatar_id: string;
   name?: string;
-  preview_url?: string;
+  preview_url?: string; // 图片 URL（用于列表显示）
+  preview_video_url?: string; // 视频 URL（用于详情页播放）
   gender?: string;
   age?: string;
   style?: string;
+  default_voice_id?: string; // Avatar 的默认声音 ID
 }
 
 // HeyGenAvatarsResponse 接口已移除，使用动态类型检查
@@ -74,102 +76,149 @@ export const getAvatars = functions.https.onCall(
       );
 
       if (!response.ok) {
-        const errorText = await response.text().catch(() => "");
-        let errorData;
+        const errorText = await response.text().catch(
+          () => "Failed to read error response"
+        );
+        let errorData: {message?: string; error?: string; detail?: string} = {};
         try {
           errorData = JSON.parse(errorText);
         } catch {
           errorData = {message: errorText || response.statusText};
         }
 
+        const errorMessage = errorData.message ||
+          errorData.error ||
+          errorData.detail ||
+          errorText ||
+          response.statusText;
+
         functions.logger.error(
           `❌ HeyGen API 调用失败: ${response.status} ${response.statusText}`,
           {
             url: heygenApiUrl,
+            status: response.status,
+            statusText: response.statusText,
             errorData,
             errorText,
+            headers: Object.fromEntries(response.headers.entries()),
           }
         );
 
         throw new functions.https.HttpsError(
           "internal",
-          `HeyGen API error (${response.status}): ` +
-          `${errorData.message || response.statusText}`
+          `HeyGen API error (${response.status}): ${errorMessage}. ` +
+          `URL: ${heygenApiUrl}`
         );
       }
 
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const result = await response.json() as
-        | AvatarInfo[]
-        | {
-            data?: {avatars?: AvatarInfo[]} | AvatarInfo[];
-            error?: {message: string};
+      // 尝试解析 JSON 响应
+      let result: unknown;
+      try {
+        result = await response.json();
+      } catch (jsonError) {
+        const responseText = await response.text().catch(
+          () => "Failed to read response"
+        );
+        const jsonErrorMessage = jsonError instanceof Error ?
+          jsonError.message :
+          String(jsonError);
+        functions.logger.error(
+          "❌ 无法解析 HeyGen API 响应为 JSON:",
+          {
+            jsonError: jsonErrorMessage,
+            responseText: responseText.substring(0, 1000),
+            contentType: response.headers.get("content-type"),
           }
-        | {avatars?: AvatarInfo[]; error?: {message: string}}
-        | unknown; // 允许任何格式以便调试
+        );
+        throw new functions.https.HttpsError(
+          "internal",
+          `Failed to parse HeyGen API response as JSON: ${
+            jsonError instanceof Error ? jsonError.message : String(jsonError)
+          }`
+        );
+      }
 
       functions.logger.info(
         "📦 HeyGen API 原始响应:",
         JSON.stringify(result).substring(0, 500)
       );
 
-      // V2 API 响应格式可能不同，需要适配
-      // 可能的格式：
-      // 1. { data: { avatars: [...] } }
-      // 2. { avatars: [...] }
-      // 3. 直接是数组 [...]
-      // 4. { data: [...] } (直接是数组)
-
+      // HeyGen V2 API 响应格式：{ error: null, data: { avatars: [...] } }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let rawAvatars: any[] = [];
 
-      if (Array.isArray(result)) {
-        // 如果直接返回数组
-        rawAvatars = result;
-      } else if (result && typeof result === "object") {
+      if (result && typeof result === "object") {
         const resultObj = result as Record<string, unknown>;
-        if ("data" in resultObj) {
-          const data = resultObj.data;
-          if (Array.isArray(data)) {
-            // 如果格式是 { data: [...] }
-            rawAvatars = data;
-          } else if (
-            data &&
-            typeof data === "object" &&
-            "avatars" in data &&
-            Array.isArray((data as Record<string, unknown>).avatars)
-          ) {
-            // 如果格式是 { data: { avatars: [...] } }
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            rawAvatars = (data as Record<string, unknown>).avatars as any[];
-          }
-        } else if ("avatars" in resultObj && Array.isArray(resultObj.avatars)) {
-          // 如果格式是 { avatars: [...] }
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          rawAvatars = resultObj.avatars as any[];
-        } else if ("error" in resultObj && resultObj.error) {
-          // 如果有错误
-          const error = resultObj.error as {message?: string};
+
+        // 检查是否有错误
+        if ("error" in resultObj && resultObj.error !== null) {
+          const error = resultObj.error as {message?: string; code?: string};
           functions.logger.error(
             "❌ HeyGen API 返回错误:",
             error
           );
+          const errorMsg = error.message || error.code || "Unknown error";
           throw new functions.https.HttpsError(
             "internal",
-            `HeyGen API error: ${error.message || "Unknown error"}`
-          );
-        } else {
-          // 未知格式，记录日志
-          functions.logger.warn(
-            "⚠️ 未知的响应格式:",
-            JSON.stringify(result).substring(0, 500)
+            `HeyGen API error: ${errorMsg}`
           );
         }
+
+        // 解析 data.avatars 格式（标准格式）
+        if ("data" in resultObj && resultObj.data) {
+          const data = resultObj.data as Record<string, unknown>;
+          if (
+            "avatars" in data &&
+            Array.isArray(data.avatars)
+          ) {
+            // 标准格式：{ error: null, data: { avatars: [...] } }
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            rawAvatars = data.avatars as any[];
+          } else if (Array.isArray(data)) {
+            // 备用格式：{ data: [...] }
+            rawAvatars = data;
+          }
+        } else if ("avatars" in resultObj && Array.isArray(resultObj.avatars)) {
+          // 备用格式：{ avatars: [...] }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          rawAvatars = resultObj.avatars as any[];
+        } else if (Array.isArray(result)) {
+          // 备用格式：直接是数组 [...]
+          rawAvatars = result;
+        } else {
+          // 未知格式，记录日志并抛出错误
+          functions.logger.error(
+            "❌ 未知的响应格式，无法解析 Avatar 列表:",
+            JSON.stringify(result).substring(0, 1000)
+          );
+          throw new functions.https.HttpsError(
+            "internal",
+            "Unknown response format from HeyGen API"
+          );
+        }
+      } else if (Array.isArray(result)) {
+        // 如果直接返回数组
+        rawAvatars = result;
+      }
+
+      // 如果解析后没有找到任何 avatar，抛出错误
+      if (rawAvatars.length === 0) {
+        functions.logger.error(
+          "❌ 未能从 HeyGen API 响应中解析出任何 Avatar 数据",
+          "响应内容:",
+          JSON.stringify(result).substring(0, 1000)
+          );
+        throw new functions.https.HttpsError(
+          "internal",
+          "No avatars found in HeyGen API response"
+        );
       }
 
       // 规范化 avatar 数据，确保字段名一致
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const avatars: AvatarInfo[] = rawAvatars.map((avatar: any) => {
+      const avatars: AvatarInfo[] = rawAvatars.map(
+        // eslint-disable-next-line max-len
+        (avatar: any, index: number) => {
         // 处理不同的字段名变体
         const avatarId =
           avatar.avatar_id ||
@@ -178,83 +227,63 @@ export const getAvatars = functions.https.onCall(
           avatar._id ||
           `avatar_${Date.now()}_${Math.random()}`;
 
-        // 记录完整的 avatar 对象以便调试（只记录前几个，避免日志过长）
-        if (avatars.length <= 3) {
+          // 记录完整的 avatar 对象以便调试（只记录前几个，避免日志过长）
+          if (index < 3) {
         functions.logger.info(
           `📋 处理 Avatar (ID: ${avatarId}):`,
           JSON.stringify(avatar, null, 2)
         );
-        }
+          }
 
-        // 记录所有可用的字段名（用于调试）
-        const allKeys = Object.keys(avatar);
-        if (!allKeys.includes("preview_url") &&
+          // 记录所有可用的字段名（用于调试）
+          const allKeys = Object.keys(avatar);
+          if (!allKeys.includes("preview_url") &&
             !allKeys.includes("previewUrl") &&
             !allKeys.includes("preview_video_url") &&
             !allKeys.includes("previewVideoUrl")) {
-          functions.logger.warn(
-            `⚠️ Avatar ${avatarId} 可能缺少预览 URL，可用字段: ${allKeys.join(", ")}`
-          );
-        }
+            functions.logger.warn(
+              `⚠️ Avatar ${avatarId} 可能缺少预览 URL，可用字段: ${allKeys.join(", ")}`
+            );
+          }
 
-        // 尝试所有可能的预览 URL 字段名（优先视频，再图片）
-        // 注意：HeyGen API 可能使用不同的字段名，需要根据实际响应调整
-        const previewUrl =
-          avatar.preview_video_url || // 视频预览 URL（优先）
-          avatar.previewVideoUrl ||
-          avatar.video_preview_url ||
-          avatar.videoPreviewUrl ||
-          avatar.video_url ||
-          avatar.videoUrl ||
-          avatar.video_preview ||
-          avatar.videoPreview ||
-          avatar.preview_image_url || // 图片预览 URL（备选）
+          // 根据实际 API 响应，使用 preview_image_url 和 preview_video_url
+          // 优先使用图片 URL（用于列表显示），视频 URL 用于详情页播放
+          const previewImageUrl =
+          avatar.preview_image_url ||
           avatar.previewImageUrl ||
           avatar.preview_url ||
           avatar.previewUrl ||
-          avatar.preview ||
           avatar.image_url ||
           avatar.imageUrl ||
           avatar.image ||
-          avatar.thumbnail ||
-          avatar.thumbnail_url ||
-          avatar.thumbnailUrl ||
-          avatar.thumb ||
-          avatar.thumb_url ||
-          avatar.thumbUrl ||
-          avatar.portrait_url ||
-          avatar.portraitUrl ||
-          avatar.portrait ||
-          avatar.photo_url ||
-          avatar.photoUrl ||
-          avatar.photo ||
-          avatar.cover_url ||
-          avatar.coverUrl ||
-          avatar.cover ||
-          avatar.avatar_image ||
-          avatar.avatarImage ||
-          avatar.avatar_url ||
-          avatar.avatarUrl ||
-          avatar.avatar ||
-          avatar.url || // 通用 URL 字段
-          avatar.media_url || // 媒体 URL
-          avatar.mediaUrl ||
-          avatar.media ||
           null;
+
+          const previewVideoUrl =
+          avatar.preview_video_url ||
+          avatar.previewVideoUrl ||
+          avatar.video_url ||
+          avatar.videoUrl ||
+          null;
+
+          // 使用图片 URL 作为主要预览 URL（列表显示）
+          const previewUrl = previewImageUrl || previewVideoUrl || null;
 
         if (!previewUrl) {
           functions.logger.warn(
-            `⚠️ Avatar ${avatarId} 没有找到预览 URL，所有字段: ${allKeys.join(", ")}`
-          );
-          // 记录前几个 avatar 的完整数据以便调试
-          if (avatars.length <= 3) {
-            functions.logger.warn(
-              `完整 Avatar 数据: ${JSON.stringify(avatar)}`
+              `⚠️ Avatar ${avatarId} 没有找到预览 URL，所有字段: ${allKeys.join(", ")}`
             );
-          }
-        } else {
-          functions.logger.info(
-            `✅ Avatar ${avatarId} 找到预览 URL: ${previewUrl.substring(0, 100)}`
+            // 记录前几个 avatar 的完整数据以便调试
+            if (index < 3) {
+              functions.logger.warn(
+                `完整 Avatar 数据: ${JSON.stringify(avatar)}`
+              );
+            }
+          } else {
+            const previewUrlPreview = previewUrl.length > 100 ?
+              `${previewUrl.substring(0, 100)}...` :
+              previewUrl;
+            functions.logger.info(
+              `✅ Avatar ${avatarId} 找到预览 URL: ${previewUrlPreview}`
           );
         }
 
@@ -267,10 +296,15 @@ export const getAvatars = functions.https.onCall(
             avatar.display_name ||
             avatar.displayName ||
             null,
-          preview_url: previewUrl,
+            preview_url: previewImageUrl, // 图片 URL（用于列表显示）
+            preview_video_url: previewVideoUrl, // 视频 URL（用于详情页播放）
           gender: avatar.gender || null,
           age: avatar.age || null,
           style: avatar.style || avatar.category || null,
+            default_voice_id: avatar.default_voice_id || // Avatar 的默认声音 ID
+              ((avatar as Record<string, unknown>).defaultVoiceId as
+                string | undefined) ||
+              null,
         };
       });
 
@@ -292,19 +326,46 @@ export const getAvatars = functions.https.onCall(
         total: avatars.length, // 返回总数，方便前端知道还有更多
       };
     } catch (error: unknown) {
+      // 记录完整的错误信息以便调试
+      let errorDetails = "Unknown error";
+      if (error instanceof Error) {
+        errorDetails = `${error.name}: ${error.message}`;
+        if (error.stack) {
+          functions.logger.error("错误堆栈:", error.stack);
+        }
+      } else {
+        errorDetails = String(error);
+      }
+
       functions.logger.error(
         "❌ 获取 Avatar 列表失败:",
-        error
+        {
+          error: errorDetails,
+          errorType: error instanceof Error ?
+            error.constructor.name :
+            typeof error,
+          errorString: String(error),
+        }
       );
 
-      // 如果是已知的 HttpsError，直接抛出
+      // 如果是已知的 HttpsError，直接抛出（但添加更多上下文）
       if (error instanceof functions.https.HttpsError) {
+        // 如果错误消息太简单，添加更多上下文
+        const originalMessage = error.message;
+        if (originalMessage === "INTERNAL" || originalMessage.length < 20) {
+          throw new functions.https.HttpsError(
+            error.code,
+            // eslint-disable-next-line max-len
+            `Failed to get avatars: ${errorDetails}. Original: ${originalMessage}`
+          );
+        }
         throw error;
       }
 
-      // 其他错误转换为 internal 错误
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      // 其他错误转换为 internal 错误，包含详细信息
+      const errorMessage = error instanceof Error ?
+        `${error.name}: ${error.message}` :
+        String(error);
       throw new functions.https.HttpsError(
         "internal",
         `Failed to get avatars: ${errorMessage}`

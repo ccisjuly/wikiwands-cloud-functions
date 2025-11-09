@@ -25,6 +25,8 @@ interface GenerateVideoRequest {
   avatarId: string;
   /** Voice ID（用户选择的声音 ID，可选，如果不提供则使用默认值） */
   voiceId?: string;
+  /** Name（显示在视频顶部的文字图层，可选） */
+  name?: string;
 }
 
 // HeyGenVideoResponse 接口已移除，使用动态类型检查
@@ -163,36 +165,65 @@ export const generateVideo = functions.https.onCall(
       const defaultVoiceId = "1bd001e7e50f421d891986aad5158bc8"; // 默认 voice_id
       const voiceId = data.voiceId || defaultVoiceId;
 
+      // 构建 video_inputs，如果有 name 则添加文字图层
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const videoInput: Record<string, any> = {
+        character: {
+          type: "avatar",
+          avatar_id: data.avatarId,
+          scale: 1.0, // Avatar 缩放比例，0-5.0，默认 1.0
+          offset: {
+            x: 0.0,
+            y: 0.0,
+          },
+        },
+        voice: {
+          type: "text",
+          voice_id: voiceId, // 使用用户选择的 voice_id 或默认值
+          input_text: data.script,
+          speed: 1.0, // 语音速度，0.5-1.5，默认 1.0
+        },
+        background: {
+          type: "image",
+          url: data.imageUrl,
+          fit: "cover", // 背景图片适配方式：cover, crop, contain, none
+        },
+      };
+
+      // 如果有 name，添加文字图层（显示在视频顶部）
+      // 注意：HeyGen API 可能不支持 text_overlay，如果 API 调用失败，可能需要使用其他方法
+      // 这里先尝试添加，如果 API 不支持，可以根据错误信息调整
+      if (data.name && data.name.trim().length > 0) {
+        videoInput.text_overlay = {
+          type: "text",
+          text: data.name.trim(),
+          position: {
+            x: 0.5, // 水平居中 (0.0-1.0)
+            y: 0.05, // 顶部位置 (0.0-1.0，0.05 表示距离顶部 5%)
+          },
+          style: {
+            font_size: 48,
+            font_weight: "bold",
+            color: "#FFFFFF", // 白色文字
+            background_color: "#00000080", // 半透明黑色背景
+            padding: {
+              top: 10,
+              bottom: 10,
+              left: 20,
+              right: 20,
+            },
+            alignment: "center",
+          },
+        };
+      }
+
       const requestBody = {
         caption: false, // 是否添加字幕
         dimension: {
           width: 720, // 竖屏：宽度 720
           height: 1280, // 竖屏：高度 1280
         },
-        video_inputs: [
-          {
-            character: {
-              type: "avatar",
-              avatar_id: data.avatarId,
-              scale: 1.0, // Avatar 缩放比例，0-5.0，默认 1.0
-              offset: {
-                x: 0.0,
-                y: 0.0,
-              },
-            },
-            voice: {
-              type: "text",
-              voice_id: voiceId, // 使用用户选择的 voice_id 或默认值
-              input_text: data.script,
-              speed: 1.0, // 语音速度，0.5-1.5，默认 1.0
-            },
-            background: {
-              type: "image",
-              url: data.imageUrl,
-              fit: "cover", // 背景图片适配方式：cover, crop, contain, none
-            },
-          },
-        ],
+        video_inputs: [videoInput],
       };
 
       // 记录请求体以便调试
