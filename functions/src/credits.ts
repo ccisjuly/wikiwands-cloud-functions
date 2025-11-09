@@ -310,11 +310,11 @@ export async function useCredits(
       usage_type: usageType,
       created_at: now,
     };
-
+    
     if (usageId) {
       transactionData.usage_id = usageId;
     }
-
+    
     transaction.set(transactionRef, transactionData);
 
     functions.logger.info(

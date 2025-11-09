@@ -36,5 +36,12 @@ service cloud.firestore {
         (resource == null || resource.data.uid == request.auth.uid);
       allow write: if false; // Only Functions/Admin SDK can write
     }
+
+    // 商品：只有创建者可以读写
+    match /products/{productId} {
+      allow read: if request.auth != null && 
+        (resource == null || resource.data.uid == request.auth.uid);
+      allow write: if false; // Only Functions/Admin SDK can write
+    }
   }
 }

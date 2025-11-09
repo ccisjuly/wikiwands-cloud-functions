@@ -24,6 +24,7 @@ export const COLLECTIONS = {
   PAYMENTS_RC: "payments/rc",
   CREDITS: "credits",
   TRANSACTIONS: "transactions",
+  PRODUCTS: "products",
 } as const;
 
 export const RC_EVENT_FIELD = {

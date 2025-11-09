@@ -15,6 +15,12 @@ import {uploadImage} from "./uploadImage.js";
 import {getUserImages} from "./getUserImages.js";
 import {getUserVideos} from "./getUserVideos.js";
 import {getUserTransactions} from "./getUserTransactions.js";
+import {scrapeProducts} from "./scrapeProducts.js";
+import {importProduct} from "./importProduct.js";
+import {getUserProducts} from "./getUserProducts.js";
+import {updateProduct} from "./updateProduct.js";
+import {uploadProductImage} from "./uploadProductImage.js";
+import {deleteProduct} from "./deleteProduct.js";
 
 if (admin.apps.length === 0) {
   admin.initializeApp();
@@ -37,4 +43,10 @@ export {
   getUserImages,
   getUserVideos,
   getUserTransactions,
+  scrapeProducts,
+  importProduct,
+  getUserProducts,
+  updateProduct,
+  uploadProductImage,
+  deleteProduct,
 };

@@ -180,10 +180,10 @@ export const getAvatars = functions.https.onCall(
 
         // 记录完整的 avatar 对象以便调试（只记录前几个，避免日志过长）
         if (avatars.length <= 3) {
-          functions.logger.info(
-            `📋 处理 Avatar (ID: ${avatarId}):`,
-            JSON.stringify(avatar, null, 2)
-          );
+        functions.logger.info(
+          `📋 处理 Avatar (ID: ${avatarId}):`,
+          JSON.stringify(avatar, null, 2)
+        );
         }
 
         // 记录所有可用的字段名（用于调试）
