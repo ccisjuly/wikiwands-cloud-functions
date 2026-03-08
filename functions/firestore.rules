@@ -1,47 +1,46 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    function owner(uid) { return request.auth != null && request.auth.uid == uid; }
+    function owner(uid) {
+      return request.auth != null && request.auth.uid == uid;
+    }
 
+    // ---------- Job Application 数据结构 ----------
+
+    // 用户档案：仅本人读写
     match /users/{uid} {
-      allow read: if owner(uid);
+      allow read, write: if owner(uid);
+    }
+
+    // 简历：仅本人读写
+    match /users/{uid}/resumes/{resumeId} {
+      allow read, write: if owner(uid);
+    }
+
+    // 简历分析：仅本人读写（后端可写，客户端可读/创建占位）
+    match /users/{uid}/resumeAnalyses/{analysisId} {
+      allow read, write: if owner(uid);
+    }
+
+    // 简历改进建议：仅本人读写
+    match /users/{uid}/resumeSuggestions/{suggestionId} {
+      allow read, write: if owner(uid);
+    }
+
+    // 申请记录：仅本人读写
+    match /users/{uid}/applications/{applicationId} {
+      allow read, write: if owner(uid);
+    }
+
+    // 生成素材（求职信等）：仅本人读写
+    match /users/{uid}/generatedAssets/{assetId} {
+      allow read, write: if owner(uid);
+    }
+
+    // 职位：已登录可读，仅后端/Admin 可写
+    match /jobs/{jobId} {
+      allow read: if request.auth != null;
       allow write: if false;
-    }
-
-    match /entitlements/{uid} {
-      allow read: if owner(uid);
-      allow write: if false; // Only Functions/Admin SDK can write
-    }
-
-    match /payments/rc/{eventId} {
-      allow read: if request.auth != null && resource.data.uid == request.auth.uid;
-      allow write: if false;
-    }
-
-    match /credits/{uid} {
-      allow read: if owner(uid);
-      allow write: if false; // Only Functions/Admin SDK can write
-    }
-
-    // 视频任务：只有创建者可以读写
-    match /video_tasks/{taskId} {
-      allow read: if request.auth != null && 
-        (resource == null || resource.data.uid == request.auth.uid);
-      allow write: if false; // Only Functions/Admin SDK can write
-    }
-
-    // 用户图片：只有用户自己可以读写
-    match /user_images/{imageId} {
-      allow read: if request.auth != null && 
-        (resource == null || resource.data.uid == request.auth.uid);
-      allow write: if false; // Only Functions/Admin SDK can write
-    }
-
-    // 商品：只有创建者可以读写
-    match /products/{productId} {
-      allow read: if request.auth != null && 
-        (resource == null || resource.data.uid == request.auth.uid);
-      allow write: if false; // Only Functions/Admin SDK can write
     }
   }
 }
