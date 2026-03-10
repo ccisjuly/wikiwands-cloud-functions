@@ -12,7 +12,7 @@ const ADZUNA_APP_KEY = process.env.ADZUNA_APP_KEY ?? "";
 const ADZUNA_COUNTRY = process.env.ADZUNA_COUNTRY ?? "gb";
 const BASE = `https://api.adzuna.com/v1/api/jobs/${ADZUNA_COUNTRY}/search`;
 
-interface AdzunaJob {
+export interface AdzunaJob {
   id: string;
   title: string;
   description?: string;

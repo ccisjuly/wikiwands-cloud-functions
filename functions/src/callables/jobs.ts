@@ -1,12 +1,33 @@
 /**
  * 职位与推荐 Callable：从 Adzuna API 拉取，按用户期望职位（必填）、地址（可选）查询
+ * 优化：Adzuna 结果短期缓存、并行写入、复用 profile、匹配率与申请查询并行
  */
 import * as admin from "firebase-admin";
+import * as crypto from "crypto";
 import * as functions from "firebase-functions/v1";
 import { computeMatchRates } from "../ai/gemini";
 import { searchAdzunaJobs, adzunaJobToAppJob } from "../services/adzuna";
+import type { AdzunaJob } from "../services/adzuna";
 import { COLLECTIONS } from "../schema";
 import { getDb, requireAuth, toApi } from "./helpers";
+
+const CACHE_TTL_MS = 10 * 60 * 1000; // 10 分钟
+
+function jobRecommendationCacheKey(params: {
+  what: string;
+  where?: string;
+  page: number;
+  limit: number;
+  salaryMin?: number;
+  salaryMax?: number;
+  fullTime: boolean;
+  permanent: boolean;
+  sortBy?: string;
+  whatExclude?: string;
+}): string {
+  const payload = JSON.stringify(params);
+  return crypto.createHash("sha256").update(payload).digest("hex").slice(0, 32);
+}
 
 export const jobRecommendations = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
@@ -14,13 +35,14 @@ export const jobRecommendations = functions.https.onCall(async (data, context) =
   const cursor = data?.cursor ?? null;
   const page = cursor ? Math.max(1, Number(cursor)) : 1;
 
+  const userRef = getDb().collection(COLLECTIONS.USERS).doc(uid);
+  let profile: Record<string, unknown> = {};
   let headline = (data?.headline as string) ?? "";
   let location = (data?.location as string) ?? "";
 
   if (!String(headline).trim()) {
-    const userRef = getDb().collection(COLLECTIONS.USERS).doc(uid);
     const userSnap = await userRef.get();
-    const profile = (userSnap.exists ? userSnap.data() : {}) as Record<string, unknown>;
+    profile = (userSnap.exists ? userSnap.data() : {}) as Record<string, unknown>;
     headline = (profile.headline as string) ?? "";
     location = (profile.location as string) ?? location;
   }
@@ -51,40 +73,77 @@ export const jobRecommendations = functions.https.onCall(async (data, context) =
     );
   }
 
-  let results: Awaited<ReturnType<typeof searchAdzunaJobs>>["results"];
-  try {
-    const out = await searchAdzunaJobs({
-      what: whatTrim,
-      where: location.trim() || undefined,
-      whatExclude,
-      salaryMin: salaryMin != null && !Number.isNaN(salaryMin) ? salaryMin : undefined,
-      salaryMax: salaryMax != null && !Number.isNaN(salaryMax) ? salaryMax : undefined,
-      fullTime: fullTime || undefined,
-      permanent: permanent || undefined,
-      sortBy,
-      page,
-      resultsPerPage: limit,
-    });
-    results = out.results;
-    functions.logger.info("jobRecommendations Adzuna response", {
-      totalCount: out.totalCount,
-      resultsCount: results.length,
-    });
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    functions.logger.warn("Adzuna API failed", { error: msg });
-    const isAuthFail = /401|AUTH_FAIL|Authorisation failed/i.test(msg);
-    const hint = isAuthFail
-      ? "Adzuna 鉴权失败：请在 Firebase 配置中设置 ADZUNA_APP_ID 与 ADZUNA_APP_KEY，且必须是 Adzuna 后台提供的两个不同值（见 https://developer.adzuna.com/）。"
-      : "拉取职位失败，请稍后重试。若持续失败请检查 Adzuna 配置：" + msg.slice(0, 80);
-    throw new functions.https.HttpsError("internal", hint);
+  const cacheKey = jobRecommendationCacheKey({
+    what: whatTrim,
+    where: location.trim() || undefined,
+    page,
+    limit,
+    salaryMin: salaryMin != null && !Number.isNaN(salaryMin) ? salaryMin : undefined,
+    salaryMax: salaryMax != null && !Number.isNaN(salaryMax) ? salaryMax : undefined,
+    fullTime,
+    permanent,
+    sortBy,
+    whatExclude,
+  });
+
+  const cacheRef = getDb().collection(COLLECTIONS.JOB_RECOMMENDATION_CACHE).doc(cacheKey);
+  const cacheSnap = await cacheRef.get();
+  const now = Date.now();
+  const cachedAt = (cacheSnap.exists ? (cacheSnap.data() as { cachedAt?: string })?.cachedAt : undefined)
+    ? new Date((cacheSnap.data() as { cachedAt: string }).cachedAt).getTime()
+    : 0;
+  const cacheHit = cacheSnap.exists && now - cachedAt < CACHE_TTL_MS;
+
+  let results: AdzunaJob[];
+  let totalCount: number;
+
+  if (cacheHit && cacheSnap.exists) {
+    const cached = cacheSnap.data() as { results?: string; totalCount?: number };
+    try {
+      results = (typeof cached.results === "string" ? JSON.parse(cached.results) : cached.results) ?? [];
+      totalCount = typeof cached.totalCount === "number" ? cached.totalCount : results.length;
+    } catch {
+      results = [];
+      totalCount = 0;
+    }
+    functions.logger.info("jobRecommendations cache hit", { cacheKey, resultsCount: results.length });
+  } else {
+    try {
+      const out = await searchAdzunaJobs({
+        what: whatTrim,
+        where: location.trim() || undefined,
+        whatExclude,
+        salaryMin: salaryMin != null && !Number.isNaN(salaryMin) ? salaryMin : undefined,
+        salaryMax: salaryMax != null && !Number.isNaN(salaryMax) ? salaryMax : undefined,
+        fullTime: fullTime || undefined,
+        permanent: permanent || undefined,
+        sortBy,
+        page,
+        resultsPerPage: limit,
+      });
+      results = out.results;
+      totalCount = out.totalCount;
+      await cacheRef.set({
+        cachedAt: new Date().toISOString(),
+        results: JSON.stringify(results),
+        totalCount,
+      });
+      functions.logger.info("jobRecommendations Adzuna response", {
+        totalCount: out.totalCount,
+        resultsCount: results.length,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      functions.logger.warn("Adzuna API failed", { error: msg });
+      const isAuthFail = /401|AUTH_FAIL|Authorisation failed/i.test(msg);
+      const hint = isAuthFail
+        ? "Adzuna 鉴权失败：请在 Firebase 配置中设置 ADZUNA_APP_ID 与 ADZUNA_APP_KEY，且必须是 Adzuna 后台提供的两个不同值（见 https://developer.adzuna.com/）。"
+        : "拉取职位失败，请稍后重试。若持续失败请检查 Adzuna 配置：" + msg.slice(0, 80);
+      throw new functions.https.HttpsError("internal", hint);
+    }
   }
 
   const jobsRef = getDb().collection(COLLECTIONS.JOBS);
-  const userRef = getDb().collection(COLLECTIONS.USERS).doc(uid);
-  const items: Array<{ job: Record<string, unknown>; score: number; currentMatch: number; aiMatch: number; appliedApplicationId?: string }> = [];
-
-  /** Firestore 不接受 undefined，写入前去掉 undefined 字段 */
   const withoutUndefined = (obj: Record<string, unknown>): Record<string, unknown> => {
     const out: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(obj)) {
@@ -93,61 +152,84 @@ export const jobRecommendations = functions.https.onCall(async (data, context) =
     return out;
   };
 
-  for (const adzunaJob of results) {
+  const items: Array<{ job: Record<string, unknown>; score: number; currentMatch: number; aiMatch: number; appliedApplicationId?: string }> = results.map((adzunaJob) => {
     const appJob = adzunaJobToAppJob(adzunaJob);
-    const docId = appJob.id as string;
-    const docData = withoutUndefined({ ...appJob, updatedAt: new Date().toISOString() });
-    await jobsRef.doc(docId).set(docData, { merge: true });
-    items.push({
+    return {
       job: toApi({ ...appJob }),
       score: 75,
       currentMatch: 75,
       aiMatch: 88,
-    });
+    };
+  });
+
+  // 仅非缓存时写入 JOBS，便于 jobGet 使用；并行写入
+  if (!cacheHit) {
+    await Promise.all(
+      results.map((adzunaJob) => {
+        const appJob = adzunaJobToAppJob(adzunaJob);
+        const docId = appJob.id as string;
+        const docData = withoutUndefined({ ...appJob, updatedAt: new Date().toISOString() });
+        return jobsRef.doc(docId).set(docData, { merge: true });
+      })
+    );
   }
 
-  try {
+  // 复用 profile：若尚未拉取则拉取一次，用于匹配率
+  if (Object.keys(profile).length === 0) {
     const userSnap = await userRef.get();
-    const profile = (userSnap.exists ? userSnap.data() : {}) as Record<string, unknown>;
-    const jobInfos = items.map((it) => ({
-      title: (it.job.title as string) ?? "",
-      description: (it.job.description as string) ?? "",
-    }));
-    const rates = await computeMatchRates(profile, jobInfos);
-    rates.forEach((r, i) => {
-      if (items[i]) {
-        items[i].currentMatch = r.currentMatch;
-        items[i].aiMatch = r.aiMatch;
-        items[i].score = r.currentMatch;
-      }
-    });
-  } catch (err) {
-    functions.logger.warn("computeMatchRates failed", { error: err instanceof Error ? err.message : String(err) });
+    profile = (userSnap.exists ? userSnap.data() : {}) as Record<string, unknown>;
   }
 
-  // 查当前用户在本页职位上的申请，用于列表/详情展示「已申请」并持久化
-  const jobIds = items.map((it) => (it.job.id as string) ?? "").filter(Boolean);
-  const jobIdToAppId: Record<string, string> = {};
-  if (jobIds.length > 0) {
-    const appRef = userRef.collection(COLLECTIONS.APPLICATIONS);
-    const chunkSize = 10;
-    for (let i = 0; i < jobIds.length; i += chunkSize) {
-      const chunk = jobIds.slice(i, i + chunkSize);
-      const q = await appRef.where("jobId", "in", chunk).get();
-      q.docs.forEach((d) => {
-        const data = d.data() as { jobId?: string };
-        if (data.jobId) jobIdToAppId[data.jobId] = d.id;
-      });
+  const jobInfos = items.map((it) => ({
+    title: (it.job.title as string) ?? "",
+    description: (it.job.description as string) ?? "",
+  }));
+
+  // 匹配率与申请查询并行
+  const [rates, jobIdToAppId] = await Promise.all([
+    computeMatchRates(profile, jobInfos).catch((err) => {
+      functions.logger.warn("computeMatchRates failed", { error: err instanceof Error ? err.message : String(err) });
+      return items.map(() => ({ currentMatch: 75, aiMatch: 88 }));
+    }),
+    (async () => {
+      const jobIds = items.map((it) => (it.job.id as string) ?? "").filter(Boolean);
+      const out: Record<string, string> = {};
+      if (jobIds.length === 0) return out;
+      const appRef = userRef.collection(COLLECTIONS.APPLICATIONS);
+      const chunkSize = 10;
+      for (let i = 0; i < jobIds.length; i += chunkSize) {
+        const chunk = jobIds.slice(i, i + chunkSize);
+        const q = await appRef.where("jobId", "in", chunk).get();
+        q.docs.forEach((d) => {
+          const data = d.data() as { jobId?: string };
+          if (data.jobId) out[data.jobId] = d.id;
+        });
+      }
+      return out;
+    })(),
+  ]);
+
+  rates.forEach((r, i) => {
+    if (items[i]) {
+      items[i].currentMatch = r.currentMatch;
+      items[i].aiMatch = r.aiMatch;
+      items[i].score = r.currentMatch;
     }
-    items.forEach((it) => {
-      const jid = (it.job.id as string) ?? "";
-      if (jobIdToAppId[jid]) it.appliedApplicationId = jobIdToAppId[jid];
-    });
-  }
+  });
+  items.forEach((it) => {
+    const jid = (it.job.id as string) ?? "";
+    if (jobIdToAppId[jid]) it.appliedApplicationId = jobIdToAppId[jid];
+  });
 
   const nextCursor = results.length >= limit ? String(page + 1) : null;
-  functions.logger.info("jobRecommendations return", { itemsCount: items.length, hasMore: results.length >= limit });
-  return { items, nextCursor, hasMore: results.length >= limit };
+  functions.logger.info("jobRecommendations return", {
+    itemsCount: items.length,
+    totalFromSource: totalCount,
+    hasMore: results.length >= limit,
+    cacheHit,
+    what: whatTrim,
+  });
+  return { items, nextCursor, hasMore: results.length >= limit, totalFromSource: totalCount };
 });
 
 export const jobsList = functions.https.onCall(async (data, context) => {

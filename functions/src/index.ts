@@ -9,10 +9,16 @@ import { runResumeParse } from "./ai/runParse";
 import * as analysis from "./callables/analysis";
 import * as applications from "./callables/applications";
 import * as assets from "./callables/assets";
+import * as customizedResumes from "./callables/customizedResumes";
 import * as jobs from "./callables/jobs";
 import * as profile from "./callables/profile";
 import * as resumes from "./callables/resumes";
 import * as suggestions from "./callables/suggestions";
+import { getUserProfile } from "./getUserProfile";
+import { onEntitlementActivated } from "./onEntitlementActivated";
+import { onNonSubscriptionPurchase } from "./onNonSubscriptionPurchase";
+import { onUserCreate } from "./onUserCreate";
+import { refreshMonthlyCredits } from "./refreshMonthlyCredits";
 
 if (admin.apps.length === 0) {
   admin.initializeApp();
@@ -58,6 +64,12 @@ export const profileApplyFromResume = profile.profileApplyFromResume;
 export const profileApplySuggestions = profile.profileApplySuggestions;
 export const profileImproveRewrite = profile.profileImproveRewrite;
 
+// ---------- 定制简历 ----------
+export const customizedResumeCreate = customizedResumes.customizedResumeCreate;
+export const customizedResumesList = customizedResumes.customizedResumesList;
+export const customizedResumeGet = customizedResumes.customizedResumeGet;
+export const customizedResumeUpdate = customizedResumes.customizedResumeUpdate;
+
 // ---------- 职位与推荐 ----------
 export const jobRecommendations = jobs.jobRecommendations;
 export const jobsList = jobs.jobsList;
@@ -80,3 +92,10 @@ export const assetGet = assets.assetGet;
 export const resumeSuggestionsList = suggestions.resumeSuggestionsList;
 export const resumeSuggestionsGenerate = suggestions.resumeSuggestionsGenerate;
 export const suggestionPatch = suggestions.suggestionPatch;
+
+// ---------- 用户与支付 ----------
+export { getUserProfile };
+export { onUserCreate };
+export { onEntitlementActivated };
+export { onNonSubscriptionPurchase };
+export { refreshMonthlyCredits };

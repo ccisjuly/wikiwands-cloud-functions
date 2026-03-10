@@ -40,6 +40,12 @@ export const COLLECTIONS = {
 
   /** Root: jobs — job listings (can be populated by sync or external API). */
   JOBS: "jobs",
+
+  /** Root: 推荐职位 Adzuna 结果短期缓存（按查询参数 key，TTL 约 10 分钟） */
+  JOB_RECOMMENDATION_CACHE: "jobRecommendationCache",
+
+  /** Subcollection: users/{userId}/customizedResumes — 按职位描述定制的在线简历版本 */
+  CUSTOMIZED_RESUMES: "customizedResumes",
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -72,6 +78,10 @@ export function generatedAssetPath(userId: string, assetId: string): string {
 
 export function jobPath(jobId: string): string {
   return `${COLLECTIONS.JOBS}/${jobId}`;
+}
+
+export function customizedResumePath(userId: string, resumeId: string): string {
+  return `${COLLECTIONS.USERS}/${userId}/${COLLECTIONS.CUSTOMIZED_RESUMES}/${resumeId}`;
 }
 
 // ---------------------------------------------------------------------------

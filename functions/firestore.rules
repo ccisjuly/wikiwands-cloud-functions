@@ -37,6 +37,11 @@ service cloud.firestore {
       allow read, write: if owner(uid);
     }
 
+    // 定制简历（按职位描述生成的简历版本）：仅本人读写
+    match /users/{uid}/customizedResumes/{resumeId} {
+      allow read, write: if owner(uid);
+    }
+
     // 职位：已登录可读，仅后端/Admin 可写
     match /jobs/{jobId} {
       allow read: if request.auth != null;
