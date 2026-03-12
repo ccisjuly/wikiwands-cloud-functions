@@ -41,17 +41,17 @@ function parseJson<T>(text: string): T {
   return JSON.parse(stripped) as T;
 }
 
-const PDF_PROMPT = `你是一个简历解析器。根据附件中的简历（PDF），提取结构化信息。
-请严格按照以下 JSON 结构返回（只返回 JSON，不要其他文字）：
+const PDF_PROMPT = `You are a resume parser. Extract structured information from the attached resume (PDF).
+Return strictly the following JSON (JSON only, no other text):
 {
   "sections": [
     {
       "type": "summary" | "experience" | "education" | "skills" | "certifications" | "projects" | "languages" | "other",
-      "rawText": "该段落的原始文本",
-      "structured": 可选，experience 为 { title, company, location?, startDate?, endDate?, current?, description?, highlights? } 数组；education 为 { degree, institution, location?, startDate?, endDate?, field?, gpa? } 数组；skills 为字符串数组
+      "rawText": "raw text of this section",
+      "structured": optional; for experience: array of { title, company, location?, startDate?, endDate?, current?, description?, highlights? }; for education: array of { degree, institution, location?, startDate?, endDate?, field?, gpa? }; for skills: string array
     }
   ],
-  "rawFullText": "简历全文纯文本（用于搜索）",
+  "rawFullText": "full resume plain text (for search)",
   "contact": {
     "email": "",
     "phone": "",
@@ -60,7 +60,7 @@ const PDF_PROMPT = `你是一个简历解析器。根据附件中的简历（PDF
     "website": ""
   }
 }
-只输出合法 JSON，不要 markdown 代码块。`;
+Output valid JSON only, no markdown code blocks.`;
 
 /** 从 PDF Buffer（base64）解析简历，不依赖 Vertex 读 GCS，避免 service agent 未就绪 */
 export async function parseResumeFromPdfBuffer(

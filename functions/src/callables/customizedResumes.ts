@@ -21,14 +21,14 @@ function mergeTailoredIntoProfile(base: ProfileRecord, tailored: { headline?: st
 export const customizedResumeCreate = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
   const jobDescription = typeof data?.jobDescription === "string" ? data.jobDescription.trim() : "";
-  if (!jobDescription) throw new functions.https.HttpsError("invalid-argument", "请填写职位描述");
+  if (!jobDescription) throw new functions.https.HttpsError("invalid-argument", "Please provide job description");
 
   const db = getDb();
   const userRef = db.collection(COLLECTIONS.USERS).doc(uid);
   const userDoc = await userRef.get();
   const base = (userDoc.exists ? userDoc.data() : {}) as ProfileRecord;
 
-  const jobRef = { title: "定制职位", description: jobDescription };
+  const jobRef = { title: "Custom job", description: jobDescription };
   const [baseMatchResult] = await computeMatchRates(base, [jobRef]);
   const baseMatchScore = baseMatchResult?.currentMatch ?? 70;
 
@@ -109,11 +109,11 @@ export const customizedResumesList = functions.https.onCall(async (data, context
 export const customizedResumeGet = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
   const id = typeof data?.id === "string" ? data.id : "";
-  if (!id) throw new functions.https.HttpsError("invalid-argument", "需要 id");
+  if (!id) throw new functions.https.HttpsError("invalid-argument", "Missing id");
 
   const ref = getDb().collection(COLLECTIONS.USERS).doc(uid).collection(COLLECTIONS.CUSTOMIZED_RESUMES).doc(id);
   const doc = await ref.get();
-  if (!doc.exists) throw new functions.https.HttpsError("not-found", "定制简历不存在");
+  if (!doc.exists) throw new functions.https.HttpsError("not-found", "Custom resume not found");
   const raw = doc.data() as { jobDescription?: string; profile?: ProfileRecord; matchScore?: number; createdAt?: Date; updatedAt?: Date };
   return toApi({
     id: doc.id,
@@ -135,12 +135,12 @@ const PROFILE_UPDATE_KEYS = new Set([
 export const customizedResumeUpdate = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
   const id = typeof data?.id === "string" ? data.id : "";
-  if (!id) throw new functions.https.HttpsError("invalid-argument", "需要 id");
+  if (!id) throw new functions.https.HttpsError("invalid-argument", "Missing id");
   const updates = data?.profile != null && typeof data.profile === "object" ? (data.profile as Record<string, unknown>) : {};
 
   const ref = getDb().collection(COLLECTIONS.USERS).doc(uid).collection(COLLECTIONS.CUSTOMIZED_RESUMES).doc(id);
   const doc = await ref.get();
-  if (!doc.exists) throw new functions.https.HttpsError("not-found", "定制简历不存在");
+  if (!doc.exists) throw new functions.https.HttpsError("not-found", "Custom resume not found");
   const raw = doc.data() as { profile?: ProfileRecord };
   const currentProfile = (raw.profile ?? {}) as ProfileRecord;
   const merged: ProfileRecord = { ...currentProfile };

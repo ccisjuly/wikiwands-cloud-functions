@@ -39,12 +39,12 @@ export const profileUpdate = functions.https.onCall(async (data, context) => {
 export const profileApplyFromResume = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
   const { resumeId, mergeSummary, mergeExperience, mergeEducation, mergeSkills, mergeContact } = data ?? {};
-  if (!resumeId) throw new functions.https.HttpsError("invalid-argument", "需要 resumeId");
+  if (!resumeId) throw new functions.https.HttpsError("invalid-argument", "Missing resumeId");
   const resumeRef = getDb().collection(COLLECTIONS.USERS).doc(uid).collection(COLLECTIONS.RESUMES).doc(resumeId);
   const resumeDoc = await resumeRef.get();
-  if (!resumeDoc.exists) throw new functions.https.HttpsError("not-found", "简历不存在");
+  if (!resumeDoc.exists) throw new functions.https.HttpsError("not-found", "Resume not found");
   const parsed = (resumeDoc.data() as { parsed?: { rawFullText?: string; sections?: Array<{ type?: string; rawText?: string; structured?: unknown }>; contact?: Record<string, string> } })?.parsed;
-  if (!parsed) throw new functions.https.HttpsError("failed-precondition", "请先完成简历解析");
+  if (!parsed) throw new functions.https.HttpsError("failed-precondition", "Please complete resume parsing first");
   const sections = parsed.sections ?? [];
   const userRef = getDb().collection(COLLECTIONS.USERS).doc(uid);
   const userDoc = await userRef.get();
@@ -90,11 +90,11 @@ export const profileApplySuggestions = functions.https.onCall(async (data, conte
   const uid = requireAuth(context);
   const { resumeId, fields } = data ?? {};
   if (!resumeId || !Array.isArray(fields) || fields.length === 0) {
-    throw new functions.https.HttpsError("invalid-argument", "需要 resumeId 和 fields 数组");
+    throw new functions.https.HttpsError("invalid-argument", "Missing resumeId and fields array");
   }
   const analysisDoc = await getDb().collection(COLLECTIONS.USERS).doc(uid)
     .collection(COLLECTIONS.RESUME_ANALYSES).doc(resumeId).get();
-  if (!analysisDoc.exists) throw new functions.https.HttpsError("not-found", "分析记录不存在");
+  if (!analysisDoc.exists) throw new functions.https.HttpsError("not-found", "Analysis record not found");
   const suggested = (analysisDoc.data() as { suggestedProfileUpdates?: Record<string, unknown> })?.suggestedProfileUpdates ?? {};
   const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   for (const f of fields) {

@@ -45,7 +45,7 @@ export const applicationCreate = functions.https.onCall(async (data, context) =>
     tailoredSkills,
   } = data ?? {};
   if (!jobId || !jobTitle || !company) {
-    throw new functions.https.HttpsError("invalid-argument", "缺少 jobId、jobTitle 或 company");
+    throw new functions.https.HttpsError("invalid-argument", "Missing jobId, jobTitle or company");
   }
   const now = new Date().toISOString();
   const ref = getDb().collection(COLLECTIONS.USERS).doc(uid).collection(COLLECTIONS.APPLICATIONS).doc();
@@ -81,7 +81,7 @@ export const customizeAndApply = functions.https.onCall(async (data, context) =>
   const uid = requireAuth(context);
   const { jobId, jobTitle, company, companyLogoUrl, jobDescription, initialMatchRate, predictedSuccessRate } = data ?? {};
   if (!jobId || !jobTitle || !company) {
-    throw new functions.https.HttpsError("invalid-argument", "缺少 jobId、jobTitle 或 company");
+    throw new functions.https.HttpsError("invalid-argument", "Missing jobId, jobTitle or company");
   }
   const db = getDb();
   const userRef = db.collection(COLLECTIONS.USERS).doc(uid);
@@ -136,19 +136,19 @@ export const customizeAndApply = functions.https.onCall(async (data, context) =>
 export const applicationGet = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
   const applicationId = data?.applicationId;
-  if (!applicationId) throw new functions.https.HttpsError("invalid-argument", "缺少 applicationId");
+  if (!applicationId) throw new functions.https.HttpsError("invalid-argument", "Missing applicationId");
   const doc = await getDb().collection(COLLECTIONS.USERS).doc(uid).collection(COLLECTIONS.APPLICATIONS).doc(applicationId).get();
-  if (!doc.exists) throw new functions.https.HttpsError("not-found", "申请不存在");
+  if (!doc.exists) throw new functions.https.HttpsError("not-found", "Application not found");
   return toApi({ id: doc.id, ...doc.data() } as Record<string, unknown>);
 });
 
 export const applicationPatch = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
   const { applicationId, status, notes, resumeId, coverLetterId } = data ?? {};
-  if (!applicationId) throw new functions.https.HttpsError("invalid-argument", "缺少 applicationId");
+  if (!applicationId) throw new functions.https.HttpsError("invalid-argument", "Missing applicationId");
   const ref = getDb().collection(COLLECTIONS.USERS).doc(uid).collection(COLLECTIONS.APPLICATIONS).doc(applicationId);
   const doc = await ref.get();
-  if (!doc.exists) throw new functions.https.HttpsError("not-found", "申请不存在");
+  if (!doc.exists) throw new functions.https.HttpsError("not-found", "Application not found");
   const updates: Record<string, unknown> = { updatedAt: new Date().toISOString() };
   if (status !== undefined) {
     updates.status = status;
@@ -168,10 +168,10 @@ export const applicationPatch = functions.https.onCall(async (data, context) => 
 export const applicationDelete = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
   const applicationId = data?.applicationId;
-  if (!applicationId) throw new functions.https.HttpsError("invalid-argument", "缺少 applicationId");
+  if (!applicationId) throw new functions.https.HttpsError("invalid-argument", "Missing applicationId");
   const ref = getDb().collection(COLLECTIONS.USERS).doc(uid).collection(COLLECTIONS.APPLICATIONS).doc(applicationId);
   const doc = await ref.get();
-  if (!doc.exists) throw new functions.https.HttpsError("not-found", "申请不存在");
+  if (!doc.exists) throw new functions.https.HttpsError("not-found", "Application not found");
   await ref.delete();
   return { deleted: true };
 });

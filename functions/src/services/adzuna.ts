@@ -74,7 +74,7 @@ export async function searchAdzunaJobs(params: JobSearchFilters): Promise<{ resu
   }
   if (!ADZUNA_APP_ID?.trim() || !ADZUNA_APP_KEY?.trim()) {
     throw new Error(
-      "Adzuna 未配置。请在 Firebase 项目配置中设置 ADZUNA_APP_ID 和 ADZUNA_APP_KEY（在 https://developer.adzuna.com/ 注册应用获取，两个值不同）。"
+      "Adzuna not configured. Set ADZUNA_APP_ID and ADZUNA_APP_KEY in Firebase config (get both from https://developer.adzuna.com/)."
     );
   }
 

@@ -58,7 +58,7 @@ export const jobRecommendations = functions.https.onCall(async (data, context) =
   functions.logger.info("jobRecommendations", {
     uid,
     what: whatTrim,
-    where: location.trim() || "(无)",
+    where: location.trim() || "(none)",
     salaryMin,
     salaryMax,
     fullTime,
@@ -69,7 +69,7 @@ export const jobRecommendations = functions.https.onCall(async (data, context) =
   if (!whatTrim) {
     throw new functions.https.HttpsError(
       "failed-precondition",
-      "请先填写期望职位（在「我的在线简历」- 基本信息中填写）"
+      "Please fill in your desired job title in Resumes → Online resume first."
     );
   }
 
@@ -137,8 +137,8 @@ export const jobRecommendations = functions.https.onCall(async (data, context) =
       functions.logger.warn("Adzuna API failed", { error: msg });
       const isAuthFail = /401|AUTH_FAIL|Authorisation failed/i.test(msg);
       const hint = isAuthFail
-        ? "Adzuna 鉴权失败：请在 Firebase 配置中设置 ADZUNA_APP_ID 与 ADZUNA_APP_KEY，且必须是 Adzuna 后台提供的两个不同值（见 https://developer.adzuna.com/）。"
-        : "拉取职位失败，请稍后重试。若持续失败请检查 Adzuna 配置：" + msg.slice(0, 80);
+        ? "Adzuna auth failed. Set ADZUNA_APP_ID and ADZUNA_APP_KEY in Firebase config (get both from https://developer.adzuna.com/)."
+        : "Failed to fetch jobs. Retry later or check Adzuna config: " + msg.slice(0, 80);
       throw new functions.https.HttpsError("internal", hint);
     }
   }
@@ -253,8 +253,8 @@ export const jobsList = functions.https.onCall(async (data, context) => {
 export const jobGet = functions.https.onCall(async (data, context) => {
   requireAuth(context);
   const jobId = data?.jobId;
-  if (!jobId) throw new functions.https.HttpsError("invalid-argument", "缺少 jobId");
+  if (!jobId) throw new functions.https.HttpsError("invalid-argument", "Missing jobId");
   const doc = await getDb().collection(COLLECTIONS.JOBS).doc(jobId).get();
-  if (!doc.exists) throw new functions.https.HttpsError("not-found", "职位不存在");
+  if (!doc.exists) throw new functions.https.HttpsError("not-found", "Job not found");
   return toApi({ id: doc.id, ...doc.data() } as Record<string, unknown>);
 });
