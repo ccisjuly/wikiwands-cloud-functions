@@ -79,7 +79,7 @@ export const applicationCreate = functions.https.onCall(async (data, context) =>
 /** 根据职位内容 AI 定制简历并创建申请：拉取用户档案与职位信息，调用 Gemini 定制，写入申请并保存定制版本 */
 export const customizeAndApply = functions.https.onCall(async (data, context) => {
   const uid = requireAuth(context);
-  const { jobId, jobTitle, company, companyLogoUrl, jobDescription, initialMatchRate, predictedSuccessRate } = data ?? {};
+  const { jobId, jobTitle, company, companyLogoUrl, jobDescription, initialMatchRate, predictedSuccessRate, jobUrl } = data ?? {};
   if (!jobId || !jobTitle || !company) {
     throw new functions.https.HttpsError("invalid-argument", "Missing jobId, jobTitle or company");
   }
@@ -128,6 +128,7 @@ export const customizeAndApply = functions.https.onCall(async (data, context) =>
   if (profile.summary != null) payload.originalSummary = profile.summary;
   if (profile.skills != null) payload.originalSkills = profile.skills;
   if (profile.experience != null) payload.originalExperience = profile.experience;
+  if (typeof jobUrl === "string" && jobUrl.trim()) payload.jobUrl = jobUrl.trim();
   await appRef.set(payload);
   const doc = await appRef.get();
   return toApi({ id: doc.id, ...doc.data() } as Record<string, unknown>);
@@ -139,7 +140,18 @@ export const applicationGet = functions.https.onCall(async (data, context) => {
   if (!applicationId) throw new functions.https.HttpsError("invalid-argument", "Missing applicationId");
   const doc = await getDb().collection(COLLECTIONS.USERS).doc(uid).collection(COLLECTIONS.APPLICATIONS).doc(applicationId).get();
   if (!doc.exists) throw new functions.https.HttpsError("not-found", "Application not found");
-  return toApi({ id: doc.id, ...doc.data() } as Record<string, unknown>);
+  const out = toApi({ id: doc.id, ...doc.data() } as Record<string, unknown>) as Record<string, unknown>;
+  if (out.jobUrl == null || out.jobUrl === "") {
+    const jobId = out.jobId as string | undefined;
+    if (jobId) {
+      const jobDoc = await getDb().collection(COLLECTIONS.JOBS).doc(jobId).get();
+      const jobData = jobDoc.exists ? (jobDoc.data() as { redirectUrl?: string }) : null;
+      out.jobUrl = jobData?.redirectUrl ?? "";
+    } else {
+      out.jobUrl = "";
+    }
+  }
+  return out;
 });
 
 export const applicationPatch = functions.https.onCall(async (data, context) => {

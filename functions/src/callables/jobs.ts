@@ -37,7 +37,8 @@ export const jobRecommendations = functions.https.onCall(async (data, context) =
 
   const userRef = getDb().collection(COLLECTIONS.USERS).doc(uid);
   let profile: Record<string, unknown> = {};
-  let headline = (data?.headline as string) ?? "";
+  // headline / keywords: search terms for job title; when empty, fall back to profile.headline
+  let headline = ((data?.headline ?? data?.keywords) as string) ?? "";
   let location = (data?.location as string) ?? "";
 
   if (!String(headline).trim()) {
@@ -162,17 +163,15 @@ export const jobRecommendations = functions.https.onCall(async (data, context) =
     };
   });
 
-  // 仅非缓存时写入 JOBS，便于 jobGet 使用；并行写入
-  if (!cacheHit) {
-    await Promise.all(
-      results.map((adzunaJob) => {
-        const appJob = adzunaJobToAppJob(adzunaJob);
-        const docId = appJob.id as string;
-        const docData = withoutUndefined({ ...appJob, updatedAt: new Date().toISOString() });
-        return jobsRef.doc(docId).set(docData, { merge: true });
-      })
-    );
-  }
+  // Always write jobs to JOBS (cache hit or not) so applicationGet can resolve jobUrl (redirectUrl) for "Go to apply"
+  await Promise.all(
+    results.map((adzunaJob) => {
+      const appJob = adzunaJobToAppJob(adzunaJob);
+      const docId = appJob.id as string;
+      const docData = withoutUndefined({ ...appJob, updatedAt: new Date().toISOString() });
+      return jobsRef.doc(docId).set(docData, { merge: true });
+    })
+  );
 
   // 复用 profile：若尚未拉取则拉取一次，用于匹配率
   if (Object.keys(profile).length === 0) {

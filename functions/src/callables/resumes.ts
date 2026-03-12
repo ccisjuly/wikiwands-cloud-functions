@@ -16,7 +16,10 @@ export const resumeUpload = functions.https.onCall(async (data, context) => {
   const bucket = getBucket();
   const resumeRef = db.collection(COLLECTIONS.USERS).doc(uid).collection(COLLECTIONS.RESUMES).doc();
   const resumeId = resumeRef.id;
-  const ext = contentType === "application/pdf" ? "pdf" : "doc";
+  let ext = "doc";
+  if (contentType === "application/pdf") ext = "pdf";
+  else if (contentType === "image/jpeg" || contentType === "image/jpg") ext = "jpg";
+  else if (contentType === "image/png") ext = "png";
   const storagePath = `users/${uid}/resumes/${resumeId}/file.${ext}`;
   const now = new Date().toISOString();
   const file = bucket.file(storagePath);
@@ -25,12 +28,13 @@ export const resumeUpload = functions.https.onCall(async (data, context) => {
     expires: Date.now() + 30 * 60 * 1000,
     contentType,
   });
+  const isImage = contentType.startsWith("image/");
   await resumeRef.set({
     userId: uid,
     fileStoragePath: storagePath,
     fileContentType: contentType,
     fileName,
-    parseStatus: "pending",
+    parseStatus: isImage ? "image" : "pending",
     createdAt: now,
     updatedAt: now,
   });
